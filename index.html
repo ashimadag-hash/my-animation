@@ -6,7 +6,7 @@
 <title>blob to shape</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #faf9f7; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  body { background: #f5f5f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
   canvas { display: block; width: 100%; max-width: 680px; border-radius: 12px; }
 </style>
 </head>
@@ -123,7 +123,7 @@ void main(){
   uv.x*=u_res.x/u_res.y;
   uv.y*=-1.0;
   float e=eio(clamp(u_morph,0.0,1.0));
-  vec3 bg=vec3(0.980,0.976,0.969);
+  vec3 bg=vec3(0.961,0.961,0.961);
   float moyaSdf=sdMoya(uv,u_time);
   float shapeSDF=mix(getShape(uv,u_shapeFrom),getShape(uv,u_shapeTo),u_shapeMix);
   float blendSdf=mix(moyaSdf,shapeSDF,e);
