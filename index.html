@@ -6,22 +6,12 @@
 <title>blob to shape</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #faf9f7; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: sans-serif; }
+  body { background: #faf9f7; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
   canvas { display: block; width: 100%; max-width: 680px; border-radius: 12px; }
-  .controls { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-  button { padding: 9px 22px; font-size: 13px; border-radius: 20px; border: 1.5px solid #bbb; background: transparent; cursor: pointer; }
-  button:hover { background: #f0ede8; }
-  .seq-label { font-size: 11px; color: #aaa; margin-top: 10px; text-align: center; max-width: 680px; width: 100%; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="controls">
-  <button id="btnPause">一時停止</button>
-  <button id="btnRestart">最初から</button>
-</div>
-<div class="seq-label">カラーA: もやもや → 三角　／　カラーB: もやもや → 丸　／　カラーC: もやもや → 四角　→ ループ</div>
-
 <script>
 const canvas = document.getElementById('c');
 const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -29,39 +19,32 @@ const DPR = Math.min(window.devicePixelRatio || 1, 2);
 const W = 680, H = 520;
 canvas.width  = W * DPR;
 canvas.height = H * DPR;
-
 const VS = `attribute vec2 a_pos; void main(){ gl_Position=vec4(a_pos,0,1); }`;
-
 const FS = `
 precision highp float;
 uniform vec2  u_res;
 uniform float u_time;
 uniform float u_morph;
-uniform float u_shapeFrom; // アンモーフ中の元シェイプ
-uniform float u_shapeTo;   // 次に変形するシェイプ
-uniform float u_shapeMix;  // 0=shapeFrom, 1=shapeTo (morphing時のみ使用)
+uniform float u_shapeFrom;
+uniform float u_shapeTo;
+uniform float u_shapeMix;
 uniform float u_colorBlend;
 uniform float u_colorFrom;
 uniform float u_colorTo;
-
 vec2 hash2(vec2 p){
   p=vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3)));
   return -1.0+2.0*fract(sin(p)*43758.5453);
 }
 float snoise(vec2 p){
   vec2 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
-  return mix(
-    mix(dot(hash2(i+vec2(0,0)),f-vec2(0,0)),dot(hash2(i+vec2(1,0)),f-vec2(1,0)),u.x),
-    mix(dot(hash2(i+vec2(0,1)),f-vec2(0,1)),dot(hash2(i+vec2(1,1)),f-vec2(1,1)),u.x),u.y);
+  return mix(mix(dot(hash2(i+vec2(0,0)),f-vec2(0,0)),dot(hash2(i+vec2(1,0)),f-vec2(1,0)),u.x),mix(dot(hash2(i+vec2(0,1)),f-vec2(0,1)),dot(hash2(i+vec2(1,1)),f-vec2(1,1)),u.x),u.y);
 }
-
 float sdMoya(vec2 p,float time){
   vec2 center=vec2(sin(time*0.17)*0.04,cos(time*0.13)*0.035);
   vec2 q=p-center;
-  // 全体をゆっくり回転させてから輪郭ノイズを計算
   float rot=time*0.18;
   float cr=cos(rot),sr=sin(rot);
-  vec2 qr=vec2(q.x*cr-q.y*sr, q.x*sr+q.y*cr);
+  vec2 qr=vec2(q.x*cr-q.y*sr,q.x*sr+q.y*cr);
   float a=atan(qr.y,qr.x);
   float n1=snoise(vec2(a*1.8+time*0.30,time*0.20))*0.07;
   float n2=snoise(vec2(a*3.2-time*0.25,time*0.15+1.7))*0.045;
@@ -71,45 +54,35 @@ float sdMoya(vec2 p,float time){
 float sdTriangle(vec2 p){
   vec2 top=vec2(0,-0.46),bl=vec2(-0.50,0.25),br=vec2(0.50,0.25);
   vec2 e0=bl-top,e1=br-bl,e2=top-br,v0=p-top,v1=p-bl,v2=p-br;
-  float d=min(min(
-    length(v0-e0*clamp(dot(v0,e0)/dot(e0,e0),0.0,1.0)),
-    length(v1-e1*clamp(dot(v1,e1)/dot(e1,e1),0.0,1.0))),
-    length(v2-e2*clamp(dot(v2,e2)/dot(e2,e2),0.0,1.0)));
+  float d=min(min(length(v0-e0*clamp(dot(v0,e0)/dot(e0,e0),0.0,1.0)),length(v1-e1*clamp(dot(v1,e1)/dot(e1,e1),0.0,1.0))),length(v2-e2*clamp(dot(v2,e2)/dot(e2,e2),0.0,1.0)));
   bool inside=(e0.x*v0.y-e0.y*v0.x<0.0)&&(e1.x*v1.y-e1.y*v1.x<0.0)&&(e2.x*v2.y-e2.y*v2.x<0.0);
   return inside?-d:d;
 }
 float sdCircle(vec2 p){ return length(p)-0.38; }
 float sdBox(vec2 p){ vec2 d=abs(p)-vec2(0.38,0.36); return length(max(d,0.0))+min(max(d.x,d.y),0.0); }
-float getShape(vec2 p,float s){
-  if(s<0.5) return sdTriangle(p);
-  else if(s<1.5) return sdCircle(p);
-  else return sdBox(p);
-}
+float getShape(vec2 p,float s){ if(s<0.5) return sdTriangle(p); else if(s<1.5) return sdCircle(p); else return sdBox(p); }
 float eio(float x){ return x<0.5?4.0*x*x*x:1.0-pow(-2.0*x+2.0,3.0)/2.0; }
 float rw(vec2 uv,vec2 c){ return max(0.0,1.0-length(uv-c)/0.55); }
-
 vec3 hsl(float h,float s,float l){
   float c2=(1.0-abs(2.0*l-1.0))*s;
   float x=c2*(1.0-abs(mod(h/60.0,2.0)-1.0));
   float m=l-c2/2.0;
   vec3 rgb;
-  if(h<60.0)       rgb=vec3(c2,x,0.0);
+  if(h<60.0) rgb=vec3(c2,x,0.0);
   else if(h<120.0) rgb=vec3(x,c2,0.0);
   else if(h<180.0) rgb=vec3(0.0,c2,x);
   else if(h<240.0) rgb=vec3(0.0,x,c2);
   else if(h<300.0) rgb=vec3(x,0.0,c2);
-  else             rgb=vec3(c2,0.0,x);
+  else rgb=vec3(c2,0.0,x);
   return clamp(rgb+m,0.0,1.0);
 }
-
 vec3 gradA(vec2 uv,float time){
   float s=time*0.08;
   vec2 p0=vec2(0.80,1.00)+vec2(sin(s*1.1)*0.04,cos(s*0.9)*0.03);
   vec2 p1=vec2(0.80,0.50)+vec2(sin(s*0.8)*0.04,cos(s*1.2)*0.03);
   vec2 p2=vec2(0.00,1.00)+vec2(sin(s*1.3)*0.04,cos(s*0.7)*0.03);
   vec3 c0=hsl(289.0,1.0,0.70),c1=hsl(137.0,1.0,0.76),c2=hsl(179.0,1.0,0.77);
-  float w0=rw(uv,p0),w1=rw(uv,p1),w2=rw(uv,p2);
-  float total=w0+w1+w2;
+  float w0=rw(uv,p0),w1=rw(uv,p1),w2=rw(uv,p2),total=w0+w1+w2;
   vec3 base=hsl(47.0,1.0,0.50);
   return total<0.001?base:mix(base,(c0*w0+c1*w1+c2*w2)/total,clamp(total,0.0,1.0));
 }
@@ -122,10 +95,8 @@ vec3 gradB(vec2 uv,float time){
   vec2 p4=vec2(0.00,1.00)+vec2(sin(s*1.2)*0.04,cos(s*0.8)*0.03);
   vec2 p5=vec2(0.80,1.00)+vec2(sin(s*0.7)*0.05,cos(s*1.3)*0.04);
   vec2 p6=vec2(0.00,0.00)+vec2(sin(s*1.0)*0.04,cos(s*1.0)*0.04);
-  vec3 c0=hsl(28.0,1.0,0.74),c1=hsl(189.0,1.0,0.56),c2=hsl(355.0,1.0,0.93);
-  vec3 c3=hsl(340.0,1.0,0.76),c4=hsl(22.0,1.0,0.77),c5=hsl(242.0,1.0,0.70),c6=hsl(343.0,1.0,0.76);
-  float w0=rw(uv,p0),w1=rw(uv,p1),w2=rw(uv,p2),w3=rw(uv,p3),w4=rw(uv,p4),w5=rw(uv,p5),w6=rw(uv,p6);
-  float total=w0+w1+w2+w3+w4+w5+w6;
+  vec3 c0=hsl(28.0,1.0,0.74),c1=hsl(189.0,1.0,0.56),c2=hsl(355.0,1.0,0.93),c3=hsl(340.0,1.0,0.76),c4=hsl(22.0,1.0,0.77),c5=hsl(242.0,1.0,0.70),c6=hsl(343.0,1.0,0.76);
+  float w0=rw(uv,p0),w1=rw(uv,p1),w2=rw(uv,p2),w3=rw(uv,p3),w4=rw(uv,p4),w5=rw(uv,p5),w6=rw(uv,p6),total=w0+w1+w2+w3+w4+w5+w6;
   vec3 base=hsl(0.0,1.0,0.50);
   return total<0.001?base:mix(base,(c0*w0+c1*w1+c2*w2+c3*w3+c4*w4+c5*w5+c6*w6)/total,clamp(total,0.0,1.0));
 }
@@ -137,10 +108,8 @@ vec3 gradC(vec2 uv,float time){
   vec2 p3=vec2(0.80,1.00)+vec2(sin(s*0.7)*0.05,cos(s*1.3)*0.04);
   vec2 p4=vec2(0.80,0.50)+vec2(sin(s*0.9)*0.04,cos(s*1.1)*0.04);
   vec2 p5=vec2(0.00,1.00)+vec2(sin(s*1.2)*0.04,cos(s*0.8)*0.03);
-  vec3 c0=hsl(216.0,1.0,0.74),c1=hsl(183.0,1.0,0.93),c2=hsl(171.0,1.0,0.76);
-  vec3 c3=hsl(70.0,1.0,0.70),c4=hsl(168.0,1.0,0.76),c5=hsl(210.0,1.0,0.77);
-  float w0=rw(uv,p0),w1=rw(uv,p1),w2=rw(uv,p2),w3=rw(uv,p3),w4=rw(uv,p4),w5=rw(uv,p5);
-  float total=w0+w1+w2+w3+w4+w5;
+  vec3 c0=hsl(216.0,1.0,0.74),c1=hsl(183.0,1.0,0.93),c2=hsl(171.0,1.0,0.76),c3=hsl(70.0,1.0,0.70),c4=hsl(168.0,1.0,0.76),c5=hsl(210.0,1.0,0.77);
+  float w0=rw(uv,p0),w1=rw(uv,p1),w2=rw(uv,p2),w3=rw(uv,p3),w4=rw(uv,p4),w5=rw(uv,p5),total=w0+w1+w2+w3+w4+w5;
   vec3 base=hsl(205.0,1.0,0.50);
   return total<0.001?base:mix(base,(c0*w0+c1*w1+c2*w2+c3*w3+c4*w4+c5*w5)/total,clamp(total,0.0,1.0));
 }
@@ -149,163 +118,58 @@ vec3 getColor(float idx,vec2 uv,float time){
   else if(idx<1.5) return gradB(uv,time);
   else return gradC(uv,time);
 }
-
 void main(){
   vec2 uv=(gl_FragCoord.xy/u_res-0.5);
   uv.x*=u_res.x/u_res.y;
   uv.y*=-1.0;
-
   float e=eio(clamp(u_morph,0.0,1.0));
   vec3 bg=vec3(0.980,0.976,0.969);
-
   float moyaSdf=sdMoya(uv,u_time);
-
-  // シェイプSDF: morphing中はshapeToへ、unmorphing中はshapeFromから戻る
-  float shapeSDFfrom=getShape(uv,u_shapeFrom);
-  float shapeSDFto  =getShape(uv,u_shapeTo);
-  // u_shapeMix: 0=From形, 1=To形 (morphing時に0→1, unmorphing時は常にFrom)
-  float shapeSDF=mix(shapeSDFfrom,shapeSDFto,u_shapeMix);
-
+  float shapeSDF=mix(getShape(uv,u_shapeFrom),getShape(uv,u_shapeTo),u_shapeMix);
   float blendSdf=mix(moyaSdf,shapeSDF,e);
   float soft=mix(0.025,0.004,e);
   float mask=smoothstep(soft,-soft,blendSdf);
-
   float rot=u_time*0.04;
   float ca=cos(rot),sa=sin(rot);
   vec2 ruv=vec2(uv.x*ca-uv.y*sa,uv.x*sa+uv.y*ca);
   vec2 gradUV=clamp(ruv/0.80*0.5+0.5,0.0,1.0);
-
-  vec3 colFrom=getColor(u_colorFrom,gradUV,u_time);
-  vec3 colTo  =getColor(u_colorTo,  gradUV,u_time);
-  vec3 texCol =mix(colFrom,colTo,eio(clamp(u_colorBlend,0.0,1.0)));
-
+  vec3 texCol=mix(getColor(u_colorFrom,gradUV,u_time),getColor(u_colorTo,gradUV,u_time),eio(clamp(u_colorBlend,0.0,1.0)));
   gl_FragColor=vec4(mix(bg,texCol,mask),1.0);
 }
 `;
-
-function compile(type,src){
-  const s=gl.createShader(type);
-  gl.shaderSource(s,src); gl.compileShader(s);
-  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
-  return s;
-}
+function compile(type,src){ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s)); return s; }
 const prog=gl.createProgram();
 gl.attachShader(prog,compile(gl.VERTEX_SHADER,VS));
 gl.attachShader(prog,compile(gl.FRAGMENT_SHADER,FS));
 gl.linkProgram(prog); gl.useProgram(prog);
-
 const buf=gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER,buf);
 gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
 const aPos=gl.getAttribLocation(prog,'a_pos');
 gl.enableVertexAttribArray(aPos);
 gl.vertexAttribPointer(aPos,2,gl.FLOAT,false,0,0);
-
-const uRes        = gl.getUniformLocation(prog,'u_res');
-const uTime       = gl.getUniformLocation(prog,'u_time');
-const uMorph      = gl.getUniformLocation(prog,'u_morph');
-const uShapeFrom  = gl.getUniformLocation(prog,'u_shapeFrom');
-const uShapeTo    = gl.getUniformLocation(prog,'u_shapeTo');
-const uShapeMix   = gl.getUniformLocation(prog,'u_shapeMix');
-const uColorBlend = gl.getUniformLocation(prog,'u_colorBlend');
-const uColorFrom  = gl.getUniformLocation(prog,'u_colorFrom');
-const uColorTo    = gl.getUniformLocation(prog,'u_colorTo');
-
-// シーケンス
-const SEQ = [
-  { colorIdx:0, shape:0 }, // カラーA → 三角
-  { colorIdx:1, shape:1 }, // カラーB → 丸
-  { colorIdx:2, shape:2 }, // カラーC → 四角
-];
-const MOYO_HOLD   = 1500;
-const MORPH_DUR   = 3500;
-const SHAPE_HOLD  = 2000;
-const UNMORPH_DUR = 2500;
-
-let t=0, paused=false, seqIdx=0;
-let phase='moyo_hold', phaseT=0;
-let morphT=0, colorBlend=1, colorFrom=0, colorTo=0;
-// シェイプ管理
-let shapeFrom=0, shapeTo=0, shapeMix=0;
-let lastMs=null;
-
+const uRes=gl.getUniformLocation(prog,'u_res'),uTime=gl.getUniformLocation(prog,'u_time'),uMorph=gl.getUniformLocation(prog,'u_morph'),uShapeFrom=gl.getUniformLocation(prog,'u_shapeFrom'),uShapeTo=gl.getUniformLocation(prog,'u_shapeTo'),uShapeMix=gl.getUniformLocation(prog,'u_shapeMix'),uColorBlend=gl.getUniformLocation(prog,'u_colorBlend'),uColorFrom=gl.getUniformLocation(prog,'u_colorFrom'),uColorTo=gl.getUniformLocation(prog,'u_colorTo');
+const SEQ=[{colorIdx:0,shape:0},{colorIdx:1,shape:1},{colorIdx:2,shape:2}];
+const MOYO_HOLD=1500,MORPH_DUR=3500,SHAPE_HOLD=2000,UNMORPH_DUR=2500;
+let t=0,seqIdx=0,phase='moyo_hold',phaseT=0,morphT=0,colorBlend=1,colorFrom=0,colorTo=0,shapeFrom=0,shapeTo=0,shapeMix=0,lastMs=null;
 function eio(x){ return x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2; }
-
 function loop(ms){
   if(!lastMs) lastMs=ms;
-  const dt=paused?0:Math.min(ms-lastMs,50);
-  lastMs=ms;
-  t+=dt*0.001;
-  phaseT+=dt;
-
+  const dt=Math.min(ms-lastMs,50); lastMs=ms;
+  t+=dt*0.001; phaseT+=dt;
   const step=SEQ[seqIdx];
-
-  if(phase==='moyo_hold'){
-    morphT=0; colorBlend=1;
-    shapeMix=0;
-    if(phaseT>=MOYO_HOLD){ phase='morphing'; phaseT=0; }
-
-  } else if(phase==='morphing'){
-    // もやもや → 今のシェイプへ変形
-    // shapeFrom=もや(使わない), shapeTo=今のシェイプ, shapeMix=1固定
-    shapeFrom=step.shape; shapeTo=step.shape; shapeMix=1.0;
-    morphT=Math.min(1,phaseT/MORPH_DUR);
-    if(phaseT>=MORPH_DUR){ morphT=1; phase='shape_hold'; phaseT=0; }
-
-  } else if(phase==='shape_hold'){
-    morphT=1; shapeMix=1.0;
-    shapeFrom=step.shape; shapeTo=step.shape;
-    if(phaseT>=SHAPE_HOLD){
-      // 次シーケンス準備
-      const prev=seqIdx;
-      seqIdx=(seqIdx+1)%SEQ.length;
-      colorFrom=SEQ[prev].colorIdx;
-      colorTo=SEQ[seqIdx].colorIdx;
-      colorBlend=0;
-      // アンモーフ: 今のシェイプからもやもやへ戻る
-      shapeFrom=SEQ[prev].shape;
-      shapeTo=SEQ[prev].shape;
-      shapeMix=1.0;
-      phase='unmorphing'; phaseT=0;
-    }
-
-  } else if(phase==='unmorphing'){
-    const progress=Math.min(1,phaseT/UNMORPH_DUR);
-    morphT=1-progress;       // シェイプ→もやもや
-    colorBlend=progress;     // カラーも同時にフェード
-    shapeMix=1.0;            // アンモーフ中はshapeFromを維持（三角が出ない）
-    if(phaseT>=UNMORPH_DUR){
-      morphT=0; colorBlend=1;
-      colorFrom=colorTo;
-      shapeMix=0;
-      phase='moyo_hold'; phaseT=0;
-    }
-  }
-
+  if(phase==='moyo_hold'){ morphT=0; colorBlend=1; shapeMix=0; if(phaseT>=MOYO_HOLD){phase='morphing';phaseT=0;} }
+  else if(phase==='morphing'){ shapeFrom=step.shape; shapeTo=step.shape; shapeMix=1.0; morphT=Math.min(1,phaseT/MORPH_DUR); if(phaseT>=MORPH_DUR){morphT=1;phase='shape_hold';phaseT=0;} }
+  else if(phase==='shape_hold'){ morphT=1; shapeMix=1.0; shapeFrom=step.shape; shapeTo=step.shape; if(phaseT>=SHAPE_HOLD){ const prev=seqIdx; seqIdx=(seqIdx+1)%SEQ.length; colorFrom=SEQ[prev].colorIdx; colorTo=SEQ[seqIdx].colorIdx; colorBlend=0; shapeFrom=SEQ[prev].shape; shapeTo=SEQ[prev].shape; shapeMix=1.0; phase='unmorphing'; phaseT=0; } }
+  else if(phase==='unmorphing'){ const p=Math.min(1,phaseT/UNMORPH_DUR); morphT=1-p; colorBlend=p; shapeMix=1.0; if(phaseT>=UNMORPH_DUR){morphT=0;colorBlend=1;colorFrom=colorTo;shapeMix=0;phase='moyo_hold';phaseT=0;} }
   gl.viewport(0,0,canvas.width,canvas.height);
   gl.uniform2f(uRes,canvas.width,canvas.height);
-  gl.uniform1f(uTime,t);
-  gl.uniform1f(uMorph,morphT);
-  gl.uniform1f(uShapeFrom,shapeFrom);
-  gl.uniform1f(uShapeTo,shapeTo);
-  gl.uniform1f(uShapeMix,shapeMix);
-  gl.uniform1f(uColorBlend,colorBlend);
-  gl.uniform1f(uColorFrom,colorFrom);
-  gl.uniform1f(uColorTo,colorTo);
+  gl.uniform1f(uTime,t); gl.uniform1f(uMorph,morphT);
+  gl.uniform1f(uShapeFrom,shapeFrom); gl.uniform1f(uShapeTo,shapeTo); gl.uniform1f(uShapeMix,shapeMix);
+  gl.uniform1f(uColorBlend,colorBlend); gl.uniform1f(uColorFrom,colorFrom); gl.uniform1f(uColorTo,colorTo);
   gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
   requestAnimationFrame(loop);
 }
-
-document.getElementById('btnPause').addEventListener('click',function(){
-  paused=!paused; this.textContent=paused?'再生':'一時停止';
-});
-document.getElementById('btnRestart').addEventListener('click',()=>{
-  seqIdx=0; phase='moyo_hold'; phaseT=0;
-  morphT=0; colorBlend=1; colorFrom=0; colorTo=0;
-  shapeFrom=0; shapeTo=0; shapeMix=0; paused=false;
-  document.getElementById('btnPause').textContent='一時停止';
-});
-
 requestAnimationFrame(loop);
 </script>
 </body>
